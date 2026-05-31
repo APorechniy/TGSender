@@ -1,4 +1,7 @@
 {
-    "super-secret-token-for-client-a": "Client_A",
-    "another-secure-token-for-client-b": "Client_B"
+    "ChessManager": {
+        "client_name": "ChessManager",
+        "telegram_token": "6998779150:AAFbpMkwcpRPF1CRX8DQscZDKz9SyrLxBg4",
+        "telegram_chat_id": "1187012709"
+    }
 }

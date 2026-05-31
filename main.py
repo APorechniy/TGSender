@@ -1,41 +1,30 @@
 import os
 import json
 import secrets
-from typing import List
+from typing import List, Dict
 from fastapi import FastAPI, Header, HTTPException, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 from pydantic import BaseModel, Field
 
-# 1. Считываем настройки скрытого пути из переменных окружения
-# Рекомендуется сгенерировать длинную случайную строку, например uuid4
+# Скрытый динамический путь из переменных окружения
 SECRET_ROUTE = os.getenv("SECRET_ROUTE_PATH", "default-hidden-route-xyz123")
 
-# 2. Инициализируем FastAPI с отключенной документацией
 app = FastAPI(
     docs_url=None, 
     redoc_url=None, 
     openapi_url=None
 )
 
-# Ограничиваем CORS. Если запросы идут не из браузера, можно оставить пустым.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В продакшене замените на конкретные домены или оставьте пустым
+    allow_origins=["*"], 
     allow_credentials=False,
     allow_methods=["POST"],
     allow_headers=["Content-Type", "X-API-Key"],
 )
 
-# Загрузка базы авторизованных клиентов
-try:
-    with open("clients.json", "r") as f:
-        CLIENTS_DB = json.load(f)
-except Exception as e:
-    # Фоллбек на случай отсутствия файла (для тестов)
-    CLIENTS_DB = {"test-token": "Test_Client"}
-
-# Схема валидации входящего запроса (Pydantic v2)
+# Описание структуры входящего запроса
 class MessageRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     phone: str = Field(..., min_length=5, max_length=20)
@@ -43,61 +32,105 @@ class MessageRequest(BaseModel):
     message: str = Field(..., max_length=1000)
     agreement: bool
 
-# Зависимость для аутентификации ("Who-is-who")
-async def verify_client(x_api_key: str = Header(..., alias="X-API-Key")) -> str:
-    # Безопасное сравнение токенов для исключения timing attacks
-    for token, client_name in CLIENTS_DB.items():
+# Контейнер для хранения параметров авторизованного клиента
+class ClientConfig(BaseModel):
+    client_name: str
+    telegram_token: str
+    telegram_chat_id: str
+
+def load_clients_dynamically() -> Dict[str, dict]:
+    """
+    Динамически считывает файл clients.json при каждом запросе.
+    Позволяет добавлять/удалять клиентов "на лету" без перезапуска сервера.
+    """
+    try:
+        with open("clients.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError:
+        # Возвращаем пустой словарь, если файл в процессе перезаписи
+        return {}
+
+async def verify_client(
+    x_api_key: str = Header(..., alias="X-API-Key"),
+    clients_db: dict = Depends(load_clients_dynamically)
+) -> ClientConfig:
+    """Аутентификация клиента по API-ключу с защитой от timing attacks."""
+    for token, client_data in clients_db.items():
         if secrets.compare_digest(token, x_api_key):
-            return client_name
+            return ClientConfig(
+                client_name=client_data.get("client_name", "Unknown"),
+                telegram_token=client_data.get("telegram_token", ""),
+                telegram_chat_id=str(client_data.get("telegram_chat_id", ""))
+            )
     
-    # Возвращаем стандартный 401/404, чтобы не давать зацепки атакующему
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Unauthorized access"
     )
 
-# Заглушка для отправки во внешний сервис
-async def send_to_external_api(payload: MessageRequest, client_name: str):
-    external_url = "https://api.external-resource-in-other-country.com/v1/send"
+def escape_markdown_v2(text: str) -> str:
+    """
+    Экранирует спецсимволы для корректной работы Telegram MarkdownV2.
+    Без этого символы вроде '+', '.', '-' вызовут ошибку 400 Bad Request.
+    """
+    escape_chars = r"_*[]()~`>#+-=|{}.!"
+    return "".join(f"\\{char}" if char in escape_chars else char for char in str(text))
+
+async def send_telegram_message(payload: MessageRequest, client: ClientConfig):
+    # Формируем URL Telegram Bot API под конкретного клиента
+    url = f"https://api.telegram.org/bot{client.telegram_token}/sendMessage"
     
-    # Сборка тела запроса для целевого API (настройте под свои нужды)
+    answers_str = ", ".join(payload.answers) if payload.answers else "нет ответов"
+    
+    # Формируем текст сообщения с использованием Markdown-разметки.
+    # Ключи оборачиваем в звездочки (жирный шрифт), а значения экранируем.
+    formatted_text = (
+        f"*Новая заявка\\!*\n\n"
+        f"*Имя:* {escape_markdown_v2(payload.name)}\n"
+        f"*Телефон:* {escape_markdown_v2(payload.phone)}\n"
+        f"*Ответы:* {escape_markdown_v2(answers_str)}\n"
+        f"*Сообщение:* {escape_markdown_v2(payload.message)}\n"
+        f"*Согласие:* {escape_markdown_v2('Да' if payload.agreement else 'Нет')}"
+    )
+    
     headers = {
-        "Authorization": "Bearer EXTERNAL_API_KEY_HERE",
         "Content-Type": "application/json"
     }
     
-    # Для демонстрации выведем лог в консоль сервера
-    print(f"[DEBUG] Отправка данных от имени '{client_name}' во внешний API...")
+    body = {
+        "chat_id": client.telegram_chat_id,
+        "text": formatted_text,
+        "parse_mode": "MarkdownV2"
+    }
     
-    # Раскомментируйте код ниже для реальной отправки:
-    # async with httpx.AsyncClient() as client:
-    #     try:
-    #         response = await client.post(
-    #             external_url, 
-    #             json=payload.model_dump(), 
-    #             headers=headers,
-    #             timeout=10.0
-    #         )
-    #         response.raise_for_status()
-    #         return response.json()
-    #     except httpx.HTTPStatusError as exc:
-    #         raise HTTPException(status_code=502, detail=f"External API error: {exc.response.status_code}")
-    #     except httpx.RequestError as exc:
-    #         raise HTTPException(status_code=503, detail="External API unavailable")
-    
-    return {"status": "simulated_success"}
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.post(url, json=body, headers=headers, timeout=10.0)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Telegram API error: {exc.response.text}"
+            )
+        except httpx.RequestError:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Telegram API is temporarily unavailable"
+            )
 
-# Единственный рабочий эндпоинт на скрытом пути
 @app.post(f"/webhook/{SECRET_ROUTE}", status_code=status.HTTP_200_OK)
 async def handle_message(
     payload: MessageRequest, 
-    client_name: str = Depends(verify_client)
+    client: ClientConfig = Depends(verify_client)
 ):
-    # Данные валидированы Pydantic, клиент успешно аутентифицирован
-    result = await send_to_external_api(payload, client_name)
+    # Отправка сформированного сообщения в Telegram
+    telegram_result = await send_telegram_message(payload, client)
     
     return {
         "success": True,
-        "client": client_name,
-        "external_response": result
+        "client": client.client_name,
+        "telegram_response": telegram_result
     }
