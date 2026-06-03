@@ -3,7 +3,6 @@ version: '3.8'
 services:
   secure-gateway:
     build: .
-    # Не пробрасываем порт 38291 наружу, общаться с ним будет только Caddy внутри Docker
     expose:
       - "8000"
     environment:
@@ -14,8 +13,8 @@ services:
     image: caddy:2-alpine
     restart: always
     ports:
-      - "80:80"   # Порт 80 нужен Caddy для проверки домена и выписки сертификата
-      - "443:443" # Внешний порт HTTPS
+      - "80:80"
+      - "8443:8443" 
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
