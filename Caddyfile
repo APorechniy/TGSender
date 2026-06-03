@@ -1,0 +1,3 @@
+1807877.xorek.cloud {
+    reverse_proxy secure-gateway:8000
+}

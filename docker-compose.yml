@@ -3,8 +3,26 @@ version: '3.8'
 services:
   secure-gateway:
     build: .
-    ports:
-      - "38291:8000" # Запуск на нестандартном внешнем порту (например, 38291)
+    # Не пробрасываем порт 38291 наружу, общаться с ним будет только Caddy внутри Docker
+    expose:
+      - "8000"
     environment:
       - SECRET_ROUTE_PATH=21d85daf-1b8f-4e59-af4f-87fdf84afa90
     restart: always
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"   # Порт 80 нужен Caddy для проверки домена и выписки сертификата
+      - "443:443" # Внешний порт HTTPS
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - secure-gateway
+
+volumes:
+  caddy_data:
+  caddy_config:
