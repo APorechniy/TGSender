@@ -82,15 +82,12 @@ async def send_telegram_message(payload: MessageRequest, client: ClientConfig):
     # Формируем URL Telegram Bot API под конкретного клиента
     url = f"https://api.telegram.org/bot{client.telegram_token}/sendMessage"
     
-    answers_str = ", ".join(payload.answers) if payload.answers else "нет ответов"
-    
     # Формируем текст сообщения с использованием Markdown-разметки.
     # Ключи оборачиваем в звездочки (жирный шрифт), а значения экранируем.
     formatted_text = (
         f"*Новая заявка\\!*\n\n"
         f"*Имя:* {escape_markdown_v2(payload.name)}\n"
         f"*Телефон:* {escape_markdown_v2(payload.phone)}\n"
-        f"*Ответы:* {escape_markdown_v2(answers_str)}\n"
         f"*Сообщение:* {escape_markdown_v2(payload.message)}\n"
         f"*Согласие:* {escape_markdown_v2('Да' if payload.agreement else 'Нет')}"
     )
