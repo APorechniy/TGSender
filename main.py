@@ -1,7 +1,7 @@
 import os
 import json
 import secrets
-from typing import List, Dict
+from typing import Dict, Optional
 from fastapi import FastAPI, Header, HTTPException, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
@@ -24,12 +24,13 @@ app.add_middleware(
     allow_headers=["Content-Type", "X-API-Key"],
 )
 
-# Описание структуры входящего запроса
+# Обновлено: Описание структуры Payload согласно типам на фронтенде
 class MessageRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     phone: str = Field(..., min_length=5, max_length=20)
-    answers: List[str] = Field(default_factory=list)
-    message: str = Field(..., max_length=1000)
+    answers: Optional[Dict[str, str]] = Field(default=None) # Словарь { вопрос: ответ }
+    message: Optional[str] = Field(default=None, max_length=1000)
+    workersCount: Optional[str] = Field(default=None, max_length=50)
     agreement: bool
 
 # Контейнер для хранения параметров авторизованного клиента
@@ -82,15 +83,50 @@ async def send_telegram_message(payload: MessageRequest, client: ClientConfig):
     # Формируем URL Telegram Bot API под конкретного клиента
     url = f"https://api.telegram.org/bot{client.telegram_token}/sendMessage"
     
-    # Формируем текст сообщения с использованием Markdown-разметки.
-    # Ключи оборачиваем в звездочки (жирный шрифт), а значения экранируем.
-    formatted_text = (
-        f"*Новая заявка\\!*\n\n"
-        f"*Имя:* {escape_markdown_v2(payload.name)}\n"
-        f"*Телефон:* {escape_markdown_v2(payload.phone)}\n"
-        f"*Сообщение:* {escape_markdown_v2(payload.message)}\n"
-        f"*Согласие:* {escape_markdown_v2('Да' if payload.agreement else 'Нет')}"
-    )
+    # 1. Форматируем обязательные базовые поля
+    esc_name = escape_markdown_v2(payload.name)
+    esc_phone = escape_markdown_v2(payload.phone)
+    esc_agreement = escape_markdown_v2("Да" if payload.agreement else "Нет")
+    
+    # Собираем блоки сообщения динамически
+    message_lines = [
+        "*Новая заявка\\!*",
+        "",
+        f"*Имя:* {esc_name}",
+        f"*Телефон:* {esc_phone}"
+    ]
+    
+    # 2. Опционально: Количество сотрудников (для Hero-формы)
+    if payload.workersCount:
+        esc_workers = escape_markdown_v2(payload.workersCount)
+        message_lines.append(f"*Количество сотрудников:* {esc_workers}")
+        
+    # 3. Опционально: Комментарий / Сообщение
+    if payload.message and payload.message.strip():
+        esc_msg = escape_markdown_v2(payload.message.strip())
+        message_lines.append("")
+        message_lines.append(f"*Сообщение:* {esc_msg}")
+        
+    # 4. Опционально: Ответы квиза в виде структурированного списка
+    if payload.answers:
+        answers_block = []
+        for question, answer in payload.answers.items():
+            if answer and answer.strip():
+                esc_question = escape_markdown_v2(question.strip())
+                esc_answer = escape_markdown_v2(answer.strip())
+                answers_block.append(f"• *{esc_question}:* {esc_answer}")
+        
+        if answers_block:
+            message_lines.append("")
+            message_lines.append("*Ответы на квиз:*")
+            message_lines.extend(answers_block)
+            
+    # 5. Обязательное поле согласия в самом конце
+    message_lines.append("")
+    message_lines.append(f"*Согласие:* {esc_agreement}")
+    
+    # Объединяем все строки через перенос строки
+    formatted_text = "\n".join(message_lines)
     
     headers = {
         "Content-Type": "application/json"
