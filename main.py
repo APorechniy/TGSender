@@ -2,7 +2,6 @@ import os
 import json
 import secrets
 from typing import Dict, Optional
-from google import genai
 from fastapi import FastAPI, Header, HTTPException, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
@@ -211,59 +210,56 @@ Strict Guidelines:
    - Hero section (Headline, detailed subheadline, input field + CTA button based on the Goal, and clean micro-features/trust-badges).
 5. Ensure the styling perfectly matches the "Design Theme Vibe" color codes. Keep code concise, clean, and under 2200 characters total. Do not include heavy scripts."""
 
-    # 3. Отправка запроса через официальный SDK Google GenAI
-    try:
-        # Инициализируем клиент SDK под другим именем, чтобы избежать конфликта с зависимостью 'client'
-        ai_client = genai.Client(api_key=GEMINI_API_KEY)
-        
-        # Используем асинхронный вызов .aio, чтобы избежать блокировки потоков в FastAPI
-        response = await ai_client.aio.models.generate_content(
-            model="gemini-3.5-flash",
-            contents=prompt
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to communicate with Gemini API: {str(exc)}"
-        )
+    # 3. Отправка прямого REST-запроса через httpx (решает проблему с префиксом AQ.)
+    gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY  # Явно передаем ключ в правильном заголовке
+    }
+    
+    body = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }],
+        "generationConfig": {
+            "responseMimeType": "application/json"
+        }
+    }
 
-    # 4. Обработка и валидация полученного ответа
-    raw_text = response.text
-    if not raw_text:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Gemini API returned an empty response"
-        )
+    async with httpx.AsyncClient() as http_client:
+        try:
+            response = await http_client.post(gemini_url, json=body, headers=headers, timeout=25.0)
+            response.raise_for_status()
+            gemini_res = response.json()
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Gemini API returned error: {exc.response.text}"
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to communicate with Gemini API: {str(exc)}"
+            )
 
+    # 4. Обработка и валидация ответа
     try:
+        raw_text = gemini_res['candidates'][0]['content']['parts'][0]['text']
         parsed_json = json.loads(raw_text)
         html_content = parsed_json.get("html", "")
         
         if not html_content:
             raise ValueError("The 'html' key is empty or missing in the response")
             
-    except json.JSONDecodeError as exc:
+    except (KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Gemini API returned invalid JSON markup: {str(exc)}"
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Invalid response structure from model: {str(exc)}"
+            detail=f"Invalid response structure or JSON from Gemini: {str(exc)}"
         )
 
-    # 5. Генерация уникального ID сессии на базе переданного ClientConfig
+    # 5. Генерация уникального ID сессии (используем оригинальный объект 'client')
     generation_id = f"landing_{secrets.token_hex(3)}_{client.client_name[:3].lower()}"
-
-    # generation_history[generation_id] = {
-            #     "client": client.client_name,
-            #     "niche": payload.niche,
-            #     "goal": payload.goal,
-            #     "vibe": payload.vibe,
-            #     "usp": payload.usp,
-            #     "html": html_content
-            # }
 
     return {
         "id": generation_id,
