@@ -211,9 +211,12 @@ Strict Guidelines:
 5. Ensure the styling perfectly matches the "Design Theme Vibe" color codes. Keep code concise, clean, and under 2200 characters total. Do not include heavy scripts."""
 
     # 3. Отправка запроса в Google Gemini REST API
-    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={GEMINI_API_KEY}"
+    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
     
-    headers = {"Content-Type": "application/json"}
+    headers = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY
+    }
     body = {
         "contents": [{
             "parts": [{"text": prompt}]
