@@ -211,11 +211,11 @@ Strict Guidelines:
 5. Ensure the styling perfectly matches the "Design Theme Vibe" color codes. Keep code concise, clean, and under 2200 characters total. Do not include heavy scripts."""
 
     # 3. Отправка прямого REST-запроса через httpx (решает проблему с префиксом AQ.)
-    gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent"
     
     headers = {
         "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY  # Явно передаем ключ в правильном заголовке
+        "X-goog-api-key": GEMINI_API_KEY  # Явно передаем ключ в правильном заголовке
     }
     
     body = {
