@@ -2,6 +2,7 @@ import os
 import json
 import secrets
 from typing import Dict, Optional
+from google import genai
 from fastapi import FastAPI, Header, HTTPException, status, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
@@ -228,10 +229,14 @@ Strict Guidelines:
 
     async with httpx.AsyncClient() as http_client:
         try:
-            response = await http_client.post(gemini_url, json=body, headers=headers, timeout=25.0)
-            response.raise_for_status()
+            client = genai.Client(api_key=GEMINI_API_KEY)
+            response = client.models.generate_content(
+                model="gemini-3.5-flash",
+                contents=prompt,
+
+            )
             
-            gemini_res = response.json()
+            gemini_res = response.text
             
             # Извлекаем сырой текст JSON из ответа Gemini
             raw_text = gemini_res['candidates'][0]['content']['parts'][0]['text']
@@ -241,14 +246,14 @@ Strict Guidelines:
             # 4. Генерация уникального ID сессии и сохранение истории
             generation_id = f"landing_{secrets.token_hex(3)}_{client.client_name[:3].lower()}"
             
-            generation_history[generation_id] = {
-                "client": client.client_name,
-                "niche": payload.niche,
-                "goal": payload.goal,
-                "vibe": payload.vibe,
-                "usp": payload.usp,
-                "html": html_content
-            }
+            # generation_history[generation_id] = {
+            #     "client": client.client_name,
+            #     "niche": payload.niche,
+            #     "goal": payload.goal,
+            #     "vibe": payload.vibe,
+            #     "usp": payload.usp,
+            #     "html": html_content
+            # }
 
             return {
                 "id": generation_id,
