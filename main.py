@@ -167,7 +167,7 @@ async def generate_preview(
     if not GEMINI_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Gemini API key is not configured on the server"
+            detail="Server configuration error: GEMINI_API_KEY is not configured"
         )
 
     # 1. Сжатый маппинг параметров для ИИ
@@ -211,42 +211,52 @@ Strict Guidelines:
    - Hero section (Headline, detailed subheadline, input field + CTA button based on the Goal, and clean micro-features/trust-badges).
 5. Ensure the styling perfectly matches the "Design Theme Vibe" color codes. Keep code concise, clean, and under 2200 characters total. Do not include heavy scripts."""
 
-    # 3. Отправка запроса в Google Gemini REST API
-    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
-    
-    headers = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY
-    }
-    body = {
-        "contents": [{
-            "parts": [{"text": prompt}]
-        }],
-        "generationConfig": {
-            "responseMimeType": "application/json"
-        }
-    }
+    # 3. Отправка запроса через официальный SDK Google GenAI
+    try:
+        # Инициализируем клиент SDK под другим именем, чтобы избежать конфликта с зависимостью 'client'
+        ai_client = genai.Client(api_key=GEMINI_API_KEY)
+        
+        # Используем асинхронный вызов .aio, чтобы избежать блокировки потоков в FastAPI
+        response = await ai_client.aio.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=prompt
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to communicate with Gemini API: {str(exc)}"
+        )
 
-    async with httpx.AsyncClient() as http_client:
-        try:
-            client = genai.Client(api_key=GEMINI_API_KEY)
-            response = client.models.generate_content(
-                model="gemini-3.5-flash",
-                contents=prompt,
+    # 4. Обработка и валидация полученного ответа
+    raw_text = response.text
+    if not raw_text:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Gemini API returned an empty response"
+        )
 
-            )
+    try:
+        parsed_json = json.loads(raw_text)
+        html_content = parsed_json.get("html", "")
+        
+        if not html_content:
+            raise ValueError("The 'html' key is empty or missing in the response")
             
-            gemini_res = response.text
-            
-            # Извлекаем сырой текст JSON из ответа Gemini
-            raw_text = gemini_res['candidates'][0]['content']['parts'][0]['text']
-            parsed_json = json.loads(raw_text)
-            html_content = parsed_json.get("html", "")
-            
-            # 4. Генерация уникального ID сессии и сохранение истории
-            generation_id = f"landing_{secrets.token_hex(3)}_{client.client_name[:3].lower()}"
-            
-            # generation_history[generation_id] = {
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Gemini API returned invalid JSON markup: {str(exc)}"
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Invalid response structure from model: {str(exc)}"
+        )
+
+    # 5. Генерация уникального ID сессии на базе переданного ClientConfig
+    generation_id = f"landing_{secrets.token_hex(3)}_{client.client_name[:3].lower()}"
+
+    # generation_history[generation_id] = {
             #     "client": client.client_name,
             #     "niche": payload.niche,
             #     "goal": payload.goal,
@@ -255,18 +265,7 @@ Strict Guidelines:
             #     "html": html_content
             # }
 
-            return {
-                "id": generation_id,
-                "html": html_content
-            }
-
-        except httpx.HTTPStatusError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Gemini API returned error: {exc.response.text}"
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Internal generator error: {str(exc)}"
-            )
+    return {
+        "id": generation_id,
+        "html": html_content
+    }
