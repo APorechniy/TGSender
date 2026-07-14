@@ -31,6 +31,7 @@ class MessageRequest(BaseModel):
     answers: Optional[Dict[str, str]] = Field(default=None) # Словарь { вопрос: ответ }
     message: Optional[str] = Field(default=None, max_length=1000)
     workersCount: Optional[str] = Field(default=None, max_length=50)
+    utmMetrics: Dict[str, str]
     agreement: bool
 
 # Контейнер для хранения параметров авторизованного клиента
@@ -120,8 +121,22 @@ async def send_telegram_message(payload: MessageRequest, client: ClientConfig):
             message_lines.append("")
             message_lines.append("*Ответы на квиз:*")
             message_lines.extend(answers_block)
+    
+    # 5. Опционально: UTM метки
+    if payload.answers:
+        utm = []
+        for utmName, utmValue in payload.utmMetrics.items():
+            if utmValue and utmValue.strip():
+                esc_utmName = escape_markdown_v2(utmName.strip())
+                esc_utmValue = escape_markdown_v2(utmValue.strip())
+                utm.append(f"• *{esc_utmName}:* {esc_utmValue}")
+        
+        if utm:
+            message_lines.append("")
+            message_lines.append("*UTM метки:*")
+            message_lines.extend(utm)
             
-    # 5. Обязательное поле согласия в самом конце
+    # 6. Обязательное поле согласия в самом конце
     message_lines.append("")
     message_lines.append(f"*Согласие:* {esc_agreement}")
     
