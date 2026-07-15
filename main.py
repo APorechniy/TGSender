@@ -31,7 +31,7 @@ class MessageRequest(BaseModel):
     answers: Optional[Dict[str, str]] = Field(default=None) # Словарь { вопрос: ответ }
     message: Optional[str] = Field(default=None, max_length=1000)
     workersCount: Optional[str] = Field(default=None, max_length=50)
-    utmMetrics: Dict[str, str]
+    utmMetrics: Optional[Dict[str, str]] = Field(default=None)
     agreement: bool
 
 # Контейнер для хранения параметров авторизованного клиента
@@ -123,7 +123,7 @@ async def send_telegram_message(payload: MessageRequest, client: ClientConfig):
             message_lines.extend(answers_block)
     
     # 5. Опционально: UTM метки
-    if payload.answers:
+    if payload.utmMetrics:
         utm = []
         for utmName, utmValue in payload.utmMetrics.items():
             if utmValue and utmValue.strip():
